@@ -91,6 +91,18 @@ public class OrderService {
         return orderRepo.findById(id).orElseThrow(() -> new RuntimeException("Order not found"));
     }
 
+//    //process all the orders
+//    public void processOrder(Order order) {
+//
+//        if (order.getType() == Order_type.BUY) {
+//            buyOrder(order);
+//        } else if (order.getType() == Order_type.SELL) {
+//            sellOrder(order);
+//        } else {
+//            throw new RuntimeException("Invalid order type");
+//        }
+//    }
+
     @Transactional
     public Order sellOrder(Order order) {
 
@@ -134,7 +146,11 @@ public class OrderService {
         double requiredAmount = order.getPrice() * order.getQuantity();
         order.setLockedAmount(requiredAmount);
 
-        User buyer = order.getUser();
+//        User buyer = order.getUser();
+        User buyer = userRepo.findById(order.getUser().getId())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        order.setUser(buyer);
 
         double availableBalance =
                 buyer.getBalance() - buyer.getLockedBalance();
@@ -255,7 +271,7 @@ public class OrderService {
     }
 
     @Transactional
-    private void matchOrders(Integer stockId) {
+    public void matchOrders(Integer stockId) {
 
         synchronized (getStockLock(stockId)) {
 
@@ -301,9 +317,17 @@ public class OrderService {
                         sellOrder.getPrice()
                 );
 
-                // Update balances
-                User buyer = buyOrder.getUser();
-                User seller = sellOrder.getUser();
+//                User buyer = buyOrder.getUser(); // by this we get password null exception
+//                User seller = sellOrder.getUser();
+
+                 // Update balances
+                User buyer = userRepo.findById(
+                        buyOrder.getUser().getId()
+                ).orElseThrow(() -> new RuntimeException("Buyer not found"));
+
+                User seller = userRepo.findById(
+                        sellOrder.getUser().getId()
+                ).orElseThrow(() -> new RuntimeException("Seller not found"));
 
                 buyer.setLockedBalance(
                         buyer.getLockedBalance() - tradeAmount
