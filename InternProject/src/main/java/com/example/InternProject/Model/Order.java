@@ -3,6 +3,7 @@ package com.example.InternProject.Model;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import lombok.Data;
 
 import java.sql.Time;
@@ -31,15 +32,20 @@ public class Order {
     private Order_type type;
 
     @NotNull
-    @Positive
+    @PositiveOrZero
     private  Double price;
     @NotNull
-    @Positive
+    @PositiveOrZero
     private Integer quantity;
+
+    @PositiveOrZero
+    private Integer originalQuantity = 0;
 
     @Enumerated(EnumType.STRING)
     private OrderStatus status;
 
+    @PositiveOrZero
+    private Double lockedAmount = 0.0;
 
     private LocalDateTime createdAt;
 }

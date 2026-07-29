@@ -3,6 +3,7 @@ package com.example.InternProject.Model;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import lombok.Data;
 
 @Entity
@@ -34,4 +35,9 @@ public class Portfolio {
     @NotNull
     @Positive
     private Double averagePrice;
+
+
+    @PositiveOrZero
+    private int lockedQuantity = 0;
+
 }
