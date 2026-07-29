@@ -1,6 +1,8 @@
 package com.example.InternProject.Controller;
 
+import com.example.InternProject.Event.OrderEventProducer;
 import com.example.InternProject.Model.Order;
+import com.example.InternProject.Model.Order_type;
 import com.example.InternProject.Service.OrderService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +17,9 @@ public class OrderController {
     @Autowired
     OrderService orderService;
 
+    @Autowired
+    OrderEventProducer orderEventProducer;
+
     @GetMapping("/orders")
     public List<Order> getAllOrders(){
        return orderService.getAllOrders();
@@ -26,13 +31,21 @@ public class OrderController {
     }
 
     @PostMapping("/orders/sell")
-    public Order sellOrder(@Valid  @RequestBody Order order){
-        return orderService.sellOrder(order);
+    public String sellOrder(@Valid  @RequestBody Order order){
+//        return orderService.sellOrder(order);
+
+        orderEventProducer.publish(order, Order_type.SELL);
+        return "Sell order submitted successfully";
     }
 
     @PostMapping("/orders/buy")
-    public Order buyOrder(@Valid @RequestBody Order order){
-        return orderService.buyOrder(order);
+
+    public String buyOrder(@Valid @RequestBody Order order){
+        System.out.println("apiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii");
+//      return orderService.buyOrder(order);
+
+        orderEventProducer.publish(order, Order_type.BUY);
+        return "Buy order submitted successfully";
     }
 
 //    @GetMapping("/orders/buyQueue")
@@ -61,9 +74,9 @@ public class OrderController {
 //        return orderService.updateOrder(id , order);
 //    }
 
-//    @DeleteMapping("/orders/{id}")
-//    public String deleteOrder( @PathVariable int id ){
-//        return orderService.deleteOrder(id);
-//    }
+    @DeleteMapping("/orders/{id}")
+    public String deleteOrder( @PathVariable int id ){
+        return orderService.deleteOrder(id);
+    }
 
 }
