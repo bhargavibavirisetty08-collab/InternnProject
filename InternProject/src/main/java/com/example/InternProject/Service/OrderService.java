@@ -8,7 +8,6 @@ import com.example.InternProject.Repo.UserRepo;
 import jakarta.annotation.PostConstruct;
 import jakarta.persistence.*;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.relational.core.sql.In;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,10 +34,7 @@ public class OrderService {
     PortfolioRepo portfolioRepo;
 
 //    private PriorityQueue<Order> buyQueue = new PriorityQueue<>(((o1, o2) -> Double.compare(o2.getPrice() , o1.getPrice())));
-//    private PriorityQueue<Order> sellQueue = new PriorityQueue<>(((o1, o2) -> Double.compare(o1.getPrice() , o2.getPrice())));
-
-    private Map<Integer , PriorityQueue<Order>> buyQueues = new ConcurrentHashMap<>();
-    private  Map<Integer , PriorityQueue<Order>> sellQueues = new ConcurrentHashMap<>();
+//    private PriorityQueue<Order> sellQueue = new PriorityQueue<>(((o1, o2) -> Double.compare(o1.getPrice() , o2.getPrice()))); //1st implement
 
 //    private PriorityQueue<Order> getBuyQueue (Integer stockId){
 //        return buyQueues.computeIfAbsent(stockId , id -> new PriorityQueue<>((o1 , o2) -> Double.compare(o2.getPrice() , o1.getPrice())));
@@ -48,6 +44,55 @@ public class OrderService {
 //        return sellQueues.computeIfAbsent(stockId , id->new PriorityQueue<>(((o1, o2) -> Double.compare(o1.getPrice() , o2.getPrice()))));
 //    }
 
+//    private Map<Integer , PriorityQueue<Order>> buyQueues = new ConcurrentHashMap<>();
+//    private  Map<Integer , PriorityQueue<Order>> sellQueues = new ConcurrentHashMap<>(); //2nd implement
+
+//    private PriorityQueue<Order> getBuyQueue(Integer stockId) {
+//        return buyQueues.computeIfAbsent(stockId, id ->
+//                new PriorityQueue<>((o1, o2) -> {
+//                    int priceCompare = Double.compare(o2.getPrice(), o1.getPrice());
+//                    if (priceCompare != 0) {
+//                        return priceCompare;
+//                    }
+//                    return o1.getCreatedAt().compareTo(o2.getCreatedAt());
+//                })
+//        );
+//    }                       // delete for store orders in a queue !!!!!!!!!!!!!
+
+//    private PriorityQueue<Order> getSellQueue(Integer stockId) {
+//        return sellQueues.computeIfAbsent(stockId, id ->
+//                new PriorityQueue<>((o1, o2) -> {
+//                    int priceCompare = Double.compare(o1.getPrice(), o2.getPrice());
+//                    if (priceCompare != 0) {
+//                        return priceCompare;
+//                    }
+//                    return o1.getCreatedAt().compareTo(o2.getCreatedAt());
+//                })
+//        );
+//    }
+
+   private Map<Integer, OrderBook> orderBooks = new ConcurrentHashMap<>(); // for every company has it's own orderBook (3rd implement)
+
+    private OrderBook getOrderBook(Integer stockId) {
+        return orderBooks.computeIfAbsent(
+                stockId,
+                id -> new OrderBook()
+        );
+    }
+
+    private ArrayDeque<Order> getBuyQueue(Integer stockId, Double price) {
+        OrderBook orderBook = getOrderBook(stockId);
+
+        return orderBook.getBuyLevels()
+                .computeIfAbsent(price, p -> new ArrayDeque<>());
+    }
+
+    private ArrayDeque<Order> getSellQueue(Integer stockId, Double price) {
+        OrderBook orderBook = getOrderBook(stockId);
+
+        return orderBook.getSellLevels()
+                .computeIfAbsent(price, p -> new ArrayDeque<>());
+    }
 
     //to check the No two threads are come at same time !
     private Map<Integer,Object> stockLocks = new ConcurrentHashMap<>();
@@ -59,29 +104,7 @@ public class OrderService {
         );
     }
 
-    private PriorityQueue<Order> getBuyQueue(Integer stockId) {
-        return buyQueues.computeIfAbsent(stockId, id ->
-                new PriorityQueue<>((o1, o2) -> {
-                    int priceCompare = Double.compare(o2.getPrice(), o1.getPrice());
-                    if (priceCompare != 0) {
-                        return priceCompare;
-                    }
-                    return o1.getCreatedAt().compareTo(o2.getCreatedAt());
-                })
-        );
-    }
 
-    private PriorityQueue<Order> getSellQueue(Integer stockId) {
-        return sellQueues.computeIfAbsent(stockId, id ->
-                new PriorityQueue<>((o1, o2) -> {
-                    int priceCompare = Double.compare(o1.getPrice(), o2.getPrice());
-                    if (priceCompare != 0) {
-                        return priceCompare;
-                    }
-                    return o1.getCreatedAt().compareTo(o2.getCreatedAt());
-                })
-        );
-    }
 
     public List<Order> getAllOrders(){
         return orderRepo.findAll();
@@ -91,17 +114,7 @@ public class OrderService {
         return orderRepo.findById(id).orElseThrow(() -> new RuntimeException("Order not found"));
     }
 
-//    //process all the orders
-//    public void processOrder(Order order) {
-//
-//        if (order.getType() == Order_type.BUY) {
-//            buyOrder(order);
-//        } else if (order.getType() == Order_type.SELL) {
-//            sellOrder(order);
-//        } else {
-//            throw new RuntimeException("Invalid order type");
-//        }
-//    }
+
 
     @Transactional
     public Order sellOrder(Order order) {
@@ -133,8 +146,11 @@ public class OrderService {
         Order savedOrder = orderRepo.save(order);
 
         // 4. Add to sell queue
-        PriorityQueue<Order> queue = getSellQueue(savedOrder.getStock().getId());
-        queue.add(savedOrder);
+      ArrayDeque<Order> queue = getSellQueue(
+                savedOrder.getStock().getId(),
+                savedOrder.getPrice()
+        );
+        queue.offer(savedOrder);
 
         // 5. Try matching
         matchOrders(savedOrder.getStock().getId());
@@ -167,13 +183,14 @@ public class OrderService {
         buyer.setLockedBalance(
                 buyer.getLockedBalance() + requiredAmount
         );
-
         userRepo.save(buyer);
-
         Order savedOrder = orderRepo.save(order);
 
-        PriorityQueue<Order> queue = getBuyQueue(savedOrder.getStock().getId());
-        queue.add(savedOrder);
+        ArrayDeque<Order> queue = getBuyQueue(
+                savedOrder.getStock().getId(),
+                savedOrder.getPrice()
+        );
+        queue.offer(savedOrder);
 
         matchOrders(savedOrder.getStock().getId());
 
@@ -217,24 +234,42 @@ public class OrderService {
         Order order = orderRepo.findById(id)
                 .orElseThrow(() -> new RuntimeException("Order not found"));
 
-        if(order.getStatus() == OrderStatus.COMPLETED){
+        if(order.getStatus() == OrderStatus.COMPLETED ||
+                order.getStatus() == OrderStatus.CANCELLED){
             throw new RuntimeException("Completed order cannot be cancelled");
         }
 
+        OrderBook orderBook = getOrderBook(order.getStock().getId());
+
         // Remove from queue
         if(order.getType() == Order_type.BUY){
-            PriorityQueue<Order> buyQueue = getBuyQueue(order.getStock().getId());
-            buyQueue.remove(order);
+
+            TreeMap<Double, ArrayDeque<Order>> buyLevels = orderBook.getBuyLevels();
+            ArrayDeque<Order> buyQueue = buyLevels.get(order.getPrice());
+            if (buyQueue != null) {
+                buyQueue.remove(order);
+                if (buyQueue.isEmpty()) {
+                    buyLevels.remove(order.getPrice());
+                }
+            }
+
             // Release locked money
             User buyer = order.getUser();
             buyer.setLockedBalance(
                     buyer.getLockedBalance() - order.getLockedAmount()
             );
             userRepo.save(buyer);
-        } else {
-            PriorityQueue<Order> sellQueue =
-                    getSellQueue(order.getStock().getId());
-            sellQueue.remove(order);
+        } else if (order.getType() == Order_type.SELL) {
+
+            TreeMap<Double, ArrayDeque<Order>> sellLevels = orderBook.getSellLevels();
+            ArrayDeque<Order> sellQueue = sellLevels.get(order.getPrice());
+            if (sellQueue != null) {
+                sellQueue.remove(order);
+                if (sellQueue.isEmpty()) {
+                    sellLevels.remove(order.getPrice());
+                }
+            }
+
             // Release locked shares
             Portfolio portfolio =
                     portfolioRepo.findByUserAndStock(
@@ -244,6 +279,9 @@ public class OrderService {
 
             portfolio.setLockedQuantity(portfolio.getLockedQuantity() - order.getQuantity());
             portfolioRepo.save(portfolio);
+        }
+        else {
+            throw new RuntimeException("Invalid order type");
         }
 
         order.setStatus(OrderStatus.CANCELLED);
@@ -256,18 +294,29 @@ public class OrderService {
         List<Order> pendingOrders =  orderRepo.findByStatusIn(List.of(
                         OrderStatus.PENDING,
                         OrderStatus.PARTIALLY_FILLED));
-
         for (Order order : pendingOrders) {
             if(order.getStock() == null){
                 continue;
             }
+            OrderBook orderBook =
+                    getOrderBook(order.getStock().getId());
             if (order.getType() == Order_type.BUY) {
-                getBuyQueue(order.getStock().getId()).add(order);
-            } else {
-               getSellQueue(order.getStock().getId()).add(order);
+                orderBook.getBuyLevels()
+                        .computeIfAbsent(
+                                order.getPrice(),
+                                price ->   new ArrayDeque<>()
+                        )
+                        .add(order);
+
+            } else if (order.getType() == Order_type.SELL) {
+                orderBook.getSellLevels()
+                        .computeIfAbsent(
+                                order.getPrice(),
+                                price ->  new ArrayDeque<>()
+                        )
+                        .add(order);
             }
         }
-
     }
 
     @Transactional
@@ -275,14 +324,34 @@ public class OrderService {
 
         synchronized (getStockLock(stockId)) {
 
-            PriorityQueue<Order> buyQueue = getBuyQueue(stockId);
-            PriorityQueue<Order> sellQueue = getSellQueue(stockId);
+            OrderBook orderBook = getOrderBook(stockId);
+            TreeMap<Double, ArrayDeque<Order>> buyLevels =
+                    orderBook.getBuyLevels();
+            TreeMap<Double, ArrayDeque<Order>> sellLevels =
+                    orderBook.getSellLevels();
+//            System.out.println("========== ORDER BOOK DEBUG ==========");
+//            System.out.println("Stock ID: " + stockId);
+//            System.out.println("BUY LEVELS: " + buyLevels.keySet());
+//            System.out.println("SELL LEVELS: " + sellLevels.keySet());
+//            System.out.println("======================================");
 
-            while (!buyQueue.isEmpty() && !sellQueue.isEmpty()) {
+            while (!buyLevels.isEmpty() && !sellLevels.isEmpty()) {
+                // 1. Get best prices
+                Map.Entry<Double, ArrayDeque<Order>> bestBuy =
+                        buyLevels.lastEntry();
+
+                Map.Entry<Double, ArrayDeque<Order>> bestSell =
+                        sellLevels.firstEntry();
+
+                // 2. Get queues
+               ArrayDeque<Order> buyQueue = bestBuy.getValue();
+                ArrayDeque<Order> sellQueue = bestSell.getValue();
+
+                // 3. Get first order at each price
                 Order buyOrder = buyQueue.peek();
                 Order sellOrder = sellQueue.peek();
 
-                // Check price matching
+                // 4. Check price matching
                 if (buyOrder.getPrice() < sellOrder.getPrice()) {
                     break;
                 }
@@ -293,7 +362,8 @@ public class OrderService {
                 );
 
                 double tradeAmount = sellOrder.getPrice() * tradedQuantity;
-                buyOrder.setLockedAmount(buyOrder.getLockedAmount() - tradeAmount);
+                double reservedAmount = buyOrder.getPrice() * tradedQuantity;
+                buyOrder.setLockedAmount(buyOrder.getLockedAmount() - reservedAmount);
 
 
                 // Create transaction history
@@ -329,36 +399,26 @@ public class OrderService {
                         sellOrder.getUser().getId()
                 ).orElseThrow(() -> new RuntimeException("Seller not found"));
 
-                buyer.setLockedBalance(
-                        buyer.getLockedBalance() - tradeAmount
-                );
-                buyer.setBalance(
-                        buyer.getBalance() - tradeAmount
-                );
-                seller.setBalance(
-                        seller.getBalance() + tradeAmount
-                );
+                buyer.setLockedBalance(buyer.getLockedBalance() - reservedAmount);
+                buyer.setBalance(buyer.getBalance() - tradeAmount);
+                seller.setBalance(seller.getBalance() + tradeAmount);
 
                 userRepo.save(buyer);
                 userRepo.save(seller);
 
                 // Reduce remaining quantities
-                buyOrder.setQuantity(
-                        buyOrder.getQuantity() - tradedQuantity
-                );
+                buyOrder.setQuantity(buyOrder.getQuantity() - tradedQuantity);
 
-                sellOrder.setQuantity(
-                        sellOrder.getQuantity() - tradedQuantity
-                );
+                sellOrder.setQuantity(sellOrder.getQuantity() - tradedQuantity);
 
                 // Update BUY order status
                 if (buyOrder.getQuantity() == 0) {
                     buyOrder.setStatus(OrderStatus.COMPLETED);
-//                    buyer.setLockedBalance(
-//                            buyer.getLockedBalance() - buyOrder.getLockedAmount()
-//                    );
-                    userRepo.save(buyer);
+//                    userRepo.save(buyer);
                     buyQueue.poll();
+                    if (buyQueue.isEmpty()) {
+                        buyLevels.remove(bestBuy.getKey()); // if no orders left in that price so we delete that entire queue
+                    }
                 } else {
                     buyOrder.setStatus(OrderStatus.PARTIALLY_FILLED);
                 }
@@ -367,6 +427,9 @@ public class OrderService {
                 if (sellOrder.getQuantity() == 0) {
                     sellOrder.setStatus(OrderStatus.COMPLETED);
                     sellQueue.poll();
+                    if (sellQueue.isEmpty()) {
+                        sellLevels.remove(bestSell.getKey()); // if no orders left in that price so we delete that entire queue
+                    }
                 } else {
                     sellOrder.setStatus(OrderStatus.PARTIALLY_FILLED);
                 }
@@ -374,6 +437,12 @@ public class OrderService {
                 orderRepo.save(buyOrder);
                 orderRepo.save(sellOrder);
 
+                System.out.println("========== STOCK DEBUG ==========");
+                System.out.println("Stock object : " + buyOrder.getStock());
+                System.out.println("Stock ID     : " + buyOrder.getStock().getId());
+                System.out.println("Stock Symbol : " + buyOrder.getStock().getSymbol());
+                System.out.println("Company Name : " + buyOrder.getStock().getCompanyName());
+                System.out.println("=================================");
                 System.out.println("Trade completed");
                 System.out.println("Stock : " + buyOrder.getStock().getSymbol());
                 System.out.println("Quantity : " + tradedQuantity);
