@@ -80,6 +80,14 @@ public class OrderService {
         );
     }
 
+    public OrderBook getOrderBookForMarketData(Integer stockId) {
+        return orderBooks.get(stockId);
+    }
+    public Set<Integer> getStockIds() {
+        return orderBooks.keySet();
+    }
+
+
     private ArrayDeque<Order> getBuyQueue(Integer stockId, Double price) {
         OrderBook orderBook = getOrderBook(stockId);
 
